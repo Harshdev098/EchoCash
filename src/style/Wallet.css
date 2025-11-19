@@ -1,0 +1,367 @@
+.main-wallet-section{
+    background-color: #f8f9fa;
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    align-items: center;
+    flex-direction: column;
+}
+
+.wallet-header{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    margin: 20px 4px;
+}
+.wallet-header button{
+    flex: 1;
+    display: flex;
+    cursor: pointer;
+    align-items: center;
+    padding: 6px;
+    margin: 6px;
+    justify-content: center;
+    font-size: 18px;
+    border: none;
+    background: none;
+}
+.wallet-header .cashuBtn{
+    border-bottom: 2px solid orange;
+}
+.wallet-header .FedimintBtn{
+    border-bottom: 2px solid #3b82f6;
+}
+
+/* fedimint wallet styling  */
+.fm-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 10px 20px;
+  width: 80%;
+}
+
+@media (max-width:620px) {
+  .fm-container{
+    width: 100%;
+    padding: 8px;
+  }
+}
+
+@media (max-width:420px) {
+  .fm-secondary-btn{
+    padding: 10px;
+    margin: 8px;
+  }
+}
+
+.fm-card {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  border: 1px solid #e8e8e8;
+}
+
+.fm-center {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 30vh;
+}
+
+.fm-subtext {
+  color: #555;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.fm-link {
+  color: #2f6feb;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.fm-link:hover {
+  text-decoration: underline;
+}
+
+.fm-primary-btn {
+  background: #2f6feb;
+  color: white;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.fm-primary-btn:hover {
+  background: #245ed6;
+}
+
+.fm-secondary-btn {
+  background: #4897e6;
+  color: white;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.fm-secondary-btn:hover {
+  background: #1f79d4;
+}
+
+.fm-balance {
+  font-size: 36px;
+  font-weight: 600;
+  margin-bottom: 15px;
+  color: #222;
+}
+
+.fm-btns{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  margin: 8px;
+  justify-content: space-around;
+}
+
+.fm-section-title {
+  margin-bottom: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #222;
+}
+
+.fm-tx-list {
+  list-style-type: disc;
+  padding-left: 20px;
+  color: #444;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.fm-tx-list li {
+  font-size: 14px;
+}
+
+/* ====================
+   Modal Overlay
+==================== */
+.fm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+  z-index: 90;
+}
+
+/* ====================
+   Modal Box
+==================== */
+.fm-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  width: 90%;
+  max-width: 420px;
+  padding: 25px;
+  border-radius: 14px;
+  box-shadow: 0px 4px 18px rgba(0,0,0,0.15);
+  z-index: 100;
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: center;
+}
+
+.fm-modal-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+/* ====================
+   Input Field
+==================== */
+.fm-input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 15px;
+}
+
+.fm-input:focus {
+  outline: none;
+  border-color: #2f6feb;
+  box-shadow: 0 0 0 2px rgba(47,111,235,0.2);
+}
+
+/* ====================
+   Suggested federation list
+==================== */
+.fm-fed-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fm-fed-item {
+  padding: 10px;
+  background: #f7f8fa;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid #e5e5e5;
+}
+
+.fm-fed-item:hover {
+  background: #eef2f6;
+}
+
+/* Divider line */
+.fm-divider {
+  width: 100%;
+  height: 1px;
+  background: #eee;
+  margin: 10px 0;
+}
+
+.fm-random-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #444;
+}
+
+/* add fund component styling  */
+
+/* Overlay */
+.fund-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+  z-index: 90;
+}
+
+/* Modal wrapper */
+.fund-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  width: 90%;
+  max-width: 420px;
+  padding: 25px;
+  border-radius: 14px;
+  box-shadow: 0px 4px 18px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Title */
+.fund-modal-title {
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Toggle buttons */
+.fund-mode-switch {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.fund-switch-btn {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #d0d7de;
+  background: #f5f6f8;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: 0.2s;
+  margin-right: 6px;
+}
+
+.fund-switch-btn:last-child {
+  margin-right: 0;
+}
+
+.fund-switch-btn.active {
+  background: #2f6feb;
+  color: white;
+  border-color: #2f6feb;
+}
+
+/* Input */
+.fund-input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 15px;
+}
+
+.fund-input:focus {
+  outline: none;
+  border-color: #2f6feb;
+  box-shadow: 0 0 0 2px rgba(47, 111, 235, 0.2);
+}
+
+/* Primary button */
+.fund-primary-btn {
+  background: #2f6feb;
+  color: white;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.fund-primary-btn:hover {
+  background: #245ed6;
+}
+
+/* Lightning invoice output */
+.fund-invoice-box {
+  margin-top: 10px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e1e4e8;
+}
+
+.fund-invoice-label {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.fund-invoice-text {
+  font-size: 13px;
+  word-break: break-all;
+  color: #333;
+}
+
