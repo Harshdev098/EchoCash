@@ -25,19 +25,21 @@ export const CashuProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             localStorage.setItem("coco-mnemonic", mnemonic);
         }
 
-        return new TextEncoder().encode(mnemonic);
-    }
+        const seed = bip39.mnemonicToSeedSync(mnemonic);
 
+        return seed;
+    }
 
     const InitailizeCashuWallet = useCallback(async () => {
         console.log("initailzing coco cashu")
         const repo = new IndexedDbRepositories({ name: 'coco-echosphere' });
         await repo.init();
         const manager = new Manager(repo, seedGetter)
+        console.log("the coco manager is ", manager)
         setCocoManager(manager)
         let mintFromLocal = localStorage.getItem('trustedMint')
         if (mintFromLocal) {
-            manager.mint.addMint(mintFromLocal)
+            manager.mint.addMint(mintFromLocal,{trusted:true})
             setisCashuWalletInitialized(true)
         }
     }, []);

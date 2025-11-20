@@ -7,10 +7,13 @@ import { useState, useEffect } from 'react';
 import { useContext } from 'react';
 import SocketContext from '../context/socket';
 import { v4 as uuidv4 } from 'uuid';
+import { TransferFunds } from '../services/TransferFund';
+import { useFedimintWallet } from '../context/fedimint';
+import { useCashuWallet } from '../context/cashu';
 
 export default function PrivateChat() {
     const dispatch = useDispatch<AppDispatch>();
-    const navigate=useNavigate()
+    const navigate = useNavigate()
     const { chatId } = useParams(); // This could be either peer ID or persistent user ID
     console.log("chatId ", chatId);
 
@@ -20,7 +23,8 @@ export default function PrivateChat() {
     const [persistentUserId, setPersistentUserId] = useState<string>('');
     const [targetPersistentId, setTargetPersistentId] = useState<string>('');
     const [displayName, setDisplayName] = useState<string>('');
-
+    const { Fedimintwallet, isFedWalletInitialized } = useFedimintWallet()
+    const { CocoManager, isCashuWalletInitialized } = useCashuWallet()
     const { socket } = useContext(SocketContext);
     // const userId = useSelector((state: RootState) => state.Peers.UserId);
 
@@ -257,6 +261,47 @@ export default function PrivateChat() {
             return;
         }
 
+        const trimmed = inputMessage.trim();
+
+        // Check for /pay command
+        if (trimmed.startsWith("/pay")) {
+            const parts = trimmed.split(" ");
+
+            if (parts.length < 2 || isNaN(Number(parts[1]))) {
+                alert("Invalid command. Use /pay <amount> or /request <amount>");
+                return;
+            }
+
+            const amount = Number(parts[1]);
+            const fedBalance = isFedWalletInitialized ? await Fedimintwallet?.balance.getBalance() : 0;
+            const cashuBalanceObj = isCashuWalletInitialized ? (await CocoManager?.wallet.getBalances()) ?? {} : {};
+            const cashuBalance = Object.values(cashuBalanceObj).reduce(
+                (sum, v) => sum + (typeof v === 'number' ? v : Number(v ?? 0)),
+                0
+            );
+
+            let ActiveWallet;
+            if (fedBalance && amount < fedBalance) {
+                ActiveWallet = false
+            } else if (cashuBalance && amount < cashuBalance) {
+                ActiveWallet = true
+            } else {
+                alert("Didn't get enough amount in the wallet")
+                return;
+            }
+
+            await TransferFunds(ActiveWallet, Fedimintwallet, CocoManager, socket, persistentUserId, amount, targetPersistentId);
+            setInputMessage("");
+            let newMessage={
+                from:myName,
+                content:inputMessage,
+                timestamp:Date.now(),
+            }
+            setMessages((prev) => [...prev, newMessage]);
+            await storeMessage(persistentUserId, targetPersistentId, newMessage);
+            return;
+        }
+
         const message = {
             type: 'message',
             to: targetPersistentId,
@@ -268,7 +313,7 @@ export default function PrivateChat() {
         const newMessage = {
             from: myName,
             content: inputMessage,
-            timestamp: Date.now()
+            timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, newMessage]);
         await storeMessage(persistentUserId, targetPersistentId, newMessage);
@@ -321,7 +366,7 @@ export default function PrivateChat() {
                 </button>
                 <div className="community-info">
                     <h2 className="community-name">Chat with {displayName}</h2>
-                    <span className="community-id">ID: {targetPersistentId.slice(0, 12)}...</span>
+                    <span className="community-id">ID: {targetPersistentId.slice(0, 12)}... <i onClick={()=>navigator.clipboard.writeText(targetPersistentId)} style={{cursor:'pointer'}} className="fa-regular fa-copy"></i></span>
                 </div>
                 <div className="online-indicator">
                     <div className="online-dot"></div>

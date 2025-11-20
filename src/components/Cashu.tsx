@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import AddFund from "./AddFund";
 import Transfer from "./Transfer";
 import { useCashuWallet } from "../context/cashu";
 import { doneProgress, startProgress } from "../utils/Progress";
+import type { HistoryEntry } from "coco-cashu-core";
 
 export default function Cashu() {
     const [mintURL, setMintURL] = useState<string | null>(null);
@@ -11,13 +12,15 @@ export default function Cashu() {
     const [openFundForm, setOpenFundForm] = useState<boolean>(false)
     const [transferForm, setTransferForm] = useState<boolean>(false)
     const { CocoManager,isCashuWalletInitialized,setisCashuWalletInitialized } = useCashuWallet()
+    const [mintInfo,setMintInfo]=useState<{url:string,name:string | undefined,pubkey:string | undefined} | null>(null)
+    const [transaction,setTransaction]=useState<HistoryEntry[] | undefined>([])
 
     const TrustMint=async()=>{
         try{
             startProgress()
             if(!mintURL) throw new Error("should enter the mint url")
             console.log("calling trust mint")
-            const mintInfo= await CocoManager?.mint.addMint(mintURL)
+            const mintInfo= await CocoManager?.mint.addMint(mintURL,{trusted:true})
             console.log("mint info is ",mintInfo)
             localStorage.setItem('trustedMint',mintInfo?.mint.mintUrl ?? '')
             setisCashuWalletInitialized(true)
@@ -28,6 +31,21 @@ export default function Cashu() {
             doneProgress()
         }
     }
+
+    useEffect(()=>{
+        const initDetails=async()=>{
+            let mint=localStorage.getItem('trustedMint')
+            if(mint){
+                let info = await CocoManager?.mint.getMintInfo(mint)
+                console.log("mint info is ",info?.name,info?.pubkey)
+                setMintInfo({url:mint,name:info?.name,pubkey:info?.pubkey})
+                let tx=await CocoManager?.history.getPaginatedHistory()
+                console.log("the transactions of cashu are ",tx)
+                setTransaction(tx)
+            }
+        }
+        initDetails()
+    },[])
 
 
     return (
@@ -78,7 +96,7 @@ export default function Cashu() {
                             </p>
 
                             <button className="fm-primary-btn" onClick={() => setOpenJoinFedForm(true)}>
-                                ➕ Activate Wallet
+                                <i className="fa-solid fa-plus"></i> Activate Wallet
                             </button>
                         </section>
                     </>
@@ -92,22 +110,20 @@ export default function Cashu() {
                             </div>
                         </section>
 
-                        {/* <section className="fm-card fm-center">
-                            <h4 className="fm-balance">Joined Federation</h4>
-                            <p>Federation name: {federationConfig?.meta.federation_name}</p>
-                            <p>Federation ID: {federationId}</p>
-                            <p>Number of guardians: { } </p>
-                        </section> */}
+                        <section className="fm-card fm-center">
+                            <h4 className="fm-balance">Added Mint</h4>
+                            <p>Mint name: {mintInfo?.name}</p>
+                            <p>Mint URL {mintInfo?.url}</p>
+                            <p>Public Key {mintInfo?.pubkey} </p>
+                        </section>
 
                         <section className="fm-card">
                             <h4 className="fm-section-title">Your Transactions</h4>
 
                             <ul className="fm-tx-list">
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
+                                {transaction?.map((tx, idx) => (
+                                    <li key={idx}>{JSON.stringify(tx)}</li>
+                                ))}
                             </ul>
                         </section>
                     </>

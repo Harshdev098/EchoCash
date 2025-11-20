@@ -1,8 +1,10 @@
 import { Link } from 'react-router'
-import { useSelector } from 'react-redux';
-import type { RootState } from '../redux/store';
+import { useDispatch, useSelector } from 'react-redux';
+import type { AppDispatch, RootState } from '../redux/store';
 import { useContext, useEffect, useState, useCallback } from 'react';
 import SocketContext from '../context/socket';
+import { CreateSocket, getPersistentUserId } from '../services/Socket';
+import { doneProgress, startProgress } from '../utils/Progress';
 
 interface PublicPost {
     from: string;
@@ -12,12 +14,20 @@ interface PublicPost {
 
 export default function PeerList() {
     const { peerId, peerCount } = useSelector((state: RootState) => state.Peers)
-    const { socket, persistentUserId } = useContext(SocketContext)
+    const { socket,setSocket } = useContext(SocketContext)
     const [publicPosts, setPublicPosts] = useState<PublicPost[]>([])
+    const dispatch=useDispatch<AppDispatch>()
 
-    const handleTriggerDiscovery = () => {
+    const handleTriggerDiscovery = async() => {
         if (socket && socket.readyState === WebSocket.OPEN) {
+            startProgress()
             socket.send(JSON.stringify({ type: 'search-peers' }))
+            const userId = await getPersistentUserId();
+            if (location.pathname.startsWith('/chat')) {
+                let new_socket=CreateSocket(socket, userId, dispatch, setSocket)
+                setSocket(new_socket);
+            }
+            doneProgress()
         }
     }
 

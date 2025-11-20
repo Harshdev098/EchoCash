@@ -16,7 +16,7 @@ export default function AddFund({ setOpenFundForm }: AddFundProps) {
     const [invoice, setInvoice] = useState<string | null>(null);
     const [fundMode, setFundMode] = useState<boolean>(true); // true -> ecash, false -> ln
     const [invoiceAmount, setInvoiceAmount] = useState<number>(0);
-    const [description, setDescription] = useState<string>("");
+    const [description, setDescription] = useState<string>("This is an invoice");
     const { Fedimintwallet } = useFedimintWallet();
     const { CocoManager } = useCashuWallet()
     const { activeTab } = useSelector((state: RootState) => state.ActiveWalletTab)
@@ -55,7 +55,8 @@ export default function AddFund({ setOpenFundForm }: AddFundProps) {
                 } else { // cashu
                     const mintURL = localStorage.getItem("trustedMint");
                     if (!mintURL) throw new Error("No Cashu mint selected");
-
+                    console.log("the mint URL is ",mintURL)
+                    await CocoManager?.mint.addMint(mintURL,{trusted:true})
                     const quote = await CocoManager?.quotes.createMintQuote(
                         mintURL,
                         invoiceAmount

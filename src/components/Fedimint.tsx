@@ -1,4 +1,4 @@
-import { generateMnemonic, getMnemonic, getWalletInfo, joinFederation } from "@fedimint/core-web";
+import { generateMnemonic, getMnemonic, getWalletInfo, joinFederation, parseBolt11Invoice, type EcashTransaction, type LightningTransaction, type Transactions, type WalletTransaction } from "@fedimint/core-web";
 import { useEffect, useState } from "react";
 import { useFedimintWallet } from "../context/fedimint";
 import { Link } from "react-router";
@@ -7,6 +7,7 @@ import type { RootState } from "../redux/store";
 import AddFund from "./AddFund";
 import Transfer from "./Transfer";
 import { doneProgress, startProgress } from "../utils/Progress";
+import type { Transaction } from "../hooks/wallet.type";
 
 export default function Fedimint() {
     const [inviteCode, setInviteCode] = useState<string | null>(null);
@@ -17,7 +18,8 @@ export default function Fedimint() {
     const { setisFedWalletInitialized, setFedimintWalletStatus, isFedWalletInitialized } = useFedimintWallet();
     const [seedPhrase, setSeedPhrase] = useState<string[] | null>(null)
     const [walletCreationTime, setWalletCreationTime] = useState<number | undefined>(0)
-    const {balance}=useSelector((state:RootState)=>state.BalanceSlice)
+    const [transaction, setTransaction] = useState<Transaction[]>([])
+    const { FedBalance,cashuBalance } = useSelector((state: RootState) => state.BalanceSlice)
     const { Fedimintwallet } = useFedimintWallet();
 
     const JoinFederation = async () => {
@@ -38,19 +40,67 @@ export default function Fedimint() {
                 localStorage.setItem("FedimintWalletId", wallet.id);
             } catch (err) {
                 console.log("An error occured");
-            }finally{
+            } finally {
                 setOpenJoinFedForm(false)
                 doneProgress()
             }
         }
     };
 
+    const fetchTXs = async () => {
+        const txList: Transactions[] | undefined = await Fedimintwallet?.federation.listTransactions();
+        if (!txList) {
+            setTransaction([]);
+            return;
+        }
+
+        const formattedTx = await Promise.all(
+            txList.map(async (tx) => {
+                let amountMsats, outcome, fee, invoice;
+                const timestamp = new Date(tx.timestamp).toLocaleString();
+                if (tx.kind === 'ln') {
+                    invoice = (tx as LightningTransaction).invoice;
+                    outcome = (tx as LightningTransaction).outcome?.toLowerCase() ?? null;
+                    amountMsats = (await parseBolt11Invoice(invoice)).amount;
+                    fee = (tx as LightningTransaction).fee ?? 0;
+                } else if (tx.kind === 'mint') {
+                    amountMsats = (tx as EcashTransaction).amountMsats / 1000;
+                    outcome = (tx as EcashTransaction).outcome?.toLowerCase() ?? null;
+                } else if (tx.kind === 'wallet') {
+                    amountMsats = (tx as WalletTransaction).amountSats;
+                    outcome = (tx as WalletTransaction).outcome?.toLowerCase() ?? null;
+                    fee = (tx as WalletTransaction).fee;
+                }
+                return {
+                    invoice,
+                    operationId: tx.operationId,
+                    type: tx.type,
+                    amountMsats,
+                    outcome,
+                    timestamp,
+                    fee: fee ?? null,
+                    kind: tx.kind,
+                } as Transaction;
+            })
+        );
+
+        setTransaction(formattedTx);
+    }
+
     useEffect(() => {
         const initDetails = async () => {
             if (Fedimintwallet) {
-                setWalletCreationTime(getWalletInfo(Fedimintwallet?.id)?.createdAt)
-                const seeds = await getMnemonic()
-                setSeedPhrase(seeds)
+                try {
+                    startProgress()
+                    setWalletCreationTime(getWalletInfo(Fedimintwallet?.id)?.createdAt)
+                    const seeds = await getMnemonic()
+                    await fetchTXs()
+                    setSeedPhrase(seeds)
+                }catch(err){
+                    console.log("An error occured")
+                }finally{
+                    doneProgress()
+                }
             }
         }
         initDetails();
@@ -94,7 +144,6 @@ export default function Fedimint() {
             {transferForm ? <Transfer setTransferForm={setTransferForm} /> : null}
 
             <div className="fm-container">
-                {/* Activate Wallet */}
                 {!isFedWalletInitialized ? (
                     <>
                         <section className="fm-card fm-center">
@@ -104,14 +153,14 @@ export default function Fedimint() {
                             </p>
 
                             <button className="fm-primary-btn" onClick={() => setOpenJoinFedForm(true)}>
-                                ➕ Activate Wallet
+                                <i className="fa-solid fa-plus"></i> Activate Wallet
                             </button>
                         </section>
                     </>
                 ) : (
                     <>
                         <section className="fm-card fm-center">
-                            <h2 className="fm-balance">{balance} SAT</h2>
+                            <h2 className="fm-balance">{FedBalance+cashuBalance} SAT</h2>
                             <div className="fm-btns">
                                 <button className="fm-secondary-btn" onClick={() => setOpenFundForm(true)}><i className="fa-solid fa-arrow-down-long"></i> Add Funds</button>
                                 <button className="fm-secondary-btn" onClick={() => setTransferForm(true)}><i className="fa-solid fa-location-arrow"></i> Transt to Peers</button>
@@ -122,33 +171,32 @@ export default function Fedimint() {
                             <h4 className="fm-balance">Joined Federation</h4>
                             <p>Federation name: {federationConfig?.meta.federation_name}</p>
                             <p>Federation ID: {federationId}</p>
-                            <p>Number of guardians: { } </p>
+                            <p>Number of guardians: {Object.keys(federationConfig?.api_endpoints ?? {}).length} </p>
                         </section>
 
                         <section className="fm-card">
-                            <h4 className="fm-section-title">Your Transactions</h4>
-
-                            <ul className="fm-tx-list">
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                                <li>sdfsdklfsdlkfsd</li>
-                            </ul>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Sno</th>
+                                        <th>Operation ID</th>
+                                        <th>Type</th>
+                                        <th>Amount</th>
+                                        <th>Invoice</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {transaction.map((tx, idx) => (
+                                        <tr key={idx}>
+                                            <td>{idx + 1}</td>
+                                            <td>{tx.operationId.slice(0,18)}...</td>
+                                            <td>{tx.type}</td>
+                                            <td>{tx.amountMsats} sats</td>
+                                            <td>{tx.invoice?.slice(0,18).concat("...") ?? "—"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </section>
 
                         <section>

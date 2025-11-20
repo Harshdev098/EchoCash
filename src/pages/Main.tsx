@@ -7,6 +7,8 @@ import type { RootState } from '../redux/store';
 import SocketContext from '../context/socket';
 import { Outlet } from 'react-router';
 import Header from '../components/Header';
+import { useCashuWallet } from '../context/cashu';
+import { useFedimintWallet } from '../context/fedimint';
 
 
 export default function Main() {
@@ -15,6 +17,8 @@ export default function Main() {
     const [message, setMessage] = useState<string>('');
     const onlinePeers = useSelector((state: RootState) => state.Peers.peerId);
     const { socket, persistentUserId } = useContext(SocketContext);
+    const {CocoManager}=useCashuWallet()
+    const {Fedimintwallet}=useFedimintWallet()
 
 
     useEffect(() => {
@@ -108,6 +112,46 @@ export default function Main() {
         setAudience(null);
         setPostBox(false);
     };
+
+    useEffect(() => {
+        if (!socket) return;
+        
+        socket.onmessage = async (event: MessageEvent) => {
+            const data = JSON.parse(event.data);
+
+            if (data.type === "ecash-send") {
+                const { notes, type, amount } = data.content;
+
+                if (type === 'cashu') {
+                    await CocoManager?.wallet.receive(notes);
+
+                    socket.send(JSON.stringify({
+                        type: "ecash-ack",
+                        to: data.from,
+                        from: persistentUserId,
+                        content: "redeemed"
+                    }));
+
+                    alert(`Received ${amount} sats`);
+                } else {
+                    await Fedimintwallet?.mint.redeemEcash(notes);
+
+                    socket.send(JSON.stringify({
+                        type: "ecash-ack",
+                        to: data.from,
+                        from: persistentUserId,
+                        content: "redeemed"
+                    }));
+
+                    alert(`Received ${amount} sats`);
+                }
+            }
+        };
+
+        return () => {
+            if (socket) socket.onmessage = null;
+        };
+    }, [socket, Fedimintwallet, CocoManager, persistentUserId])
 
     return (
         <main className='mainchatContent'>

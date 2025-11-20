@@ -1,4 +1,10 @@
-import React, { useState } from 'react'
+import React, { useContext, useState } from 'react'
+import { useCashuWallet } from '../context/cashu';
+import { useSelector } from 'react-redux';
+import type { RootState } from '../redux/store';
+import { useFedimintWallet } from '../context/fedimint';
+import SocketContext from '../context/socket';
+import { TransferFunds } from '../services/TransferFund';
 
 interface TransferProps {
     setTransferForm: React.Dispatch<React.SetStateAction<boolean>>;
@@ -7,9 +13,22 @@ interface TransferProps {
 export default function Transfer({ setTransferForm }: TransferProps) {
     const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null)
     const [transferAmount, setTransferAmount] = useState<number>(0)
+    const { activeTab } = useSelector((state: RootState) => state.ActiveWalletTab)
+    const { CocoManager } = useCashuWallet()
+    const { Fedimintwallet } = useFedimintWallet();
+    const { socket,persistentUserId } = useContext(SocketContext);
 
-    const TransferToPeer = () => {
-
+    const TransferToPeer = async () => {
+        if (!selectedPeerId || transferAmount <= 0) {
+            alert("Enter valid peer and amount");
+            return;
+        }
+        try {
+            await TransferFunds(activeTab,Fedimintwallet,CocoManager,socket,persistentUserId,transferAmount,selectedPeerId)
+            setTransferForm(false)
+        } catch (err) {
+            console.log("Error sending ecash:", err);
+        }
     }
 
     return (

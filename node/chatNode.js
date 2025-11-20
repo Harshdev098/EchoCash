@@ -9,30 +9,39 @@ export const createChatNode = async (onPeerUpdate, onMessage) => {
     });
 
     const peers = new Set();
+
     node.addEventListener('peer:discovery', (evt) => {
         const peerId = evt.detail.id.toString();
         console.log('Discovered peer:', peerId, 'with multiaddrs:', evt.detail.multiaddrs.map(addr => addr.toString()));
+        
         if (!peers.has(peerId)) {
             peers.add(peerId);
             onPeerUpdate(Array.from(peers));
         }
     });
 
-    // Subscribe to chat topic for this peer
-    const topic = `${node.peerId.toString()}`;
-    node.services.pubsub.subscribe(topic);
+    // Subscribe to THIS node's own topic to receive messages
+    const myTopic = `chat-${node.peerId.toString()}`;
+    node.services.pubsub.subscribe(myTopic);
+    console.log(`Subscribed to own topic: ${myTopic}`);
+
     node.services.pubsub.addEventListener('message', (evt) => {
-        if (evt.detail.topic === topic) {
+        console.log(`Received message on topic: ${evt.detail.topic}`);
+        
+        // Only process messages on this node's topic
+        if (evt.detail.topic === myTopic) {
             const message = new TextDecoder().decode(evt.detail.data);
             const fromPeerId = evt.detail.from.toString();
-            console.log(`Received message on topic ${topic} from ${fromPeerId}:`, message);
+            console.log(`Received message from ${fromPeerId}:`, message);
             onMessage(message, fromPeerId);
         }
     });
 
     const triggerDiscovery = async () => {
         console.log("Triggering discovery");
-        await node.start()
+        // Discovery is already running via mdns and bootstrap
+        // Just return the current peers
+        return Array.from(peers);
     };
 
     const getPeers = () => Array.from(peers);
@@ -47,12 +56,41 @@ export const createChatNode = async (onPeerUpdate, onMessage) => {
     };
 
     const sendMessage = async (toPeerId, content) => {
-        const topic = `${node.peerId.toString()}`;
+        // Publish to the RECIPIENT's topic, not your own
+        const topic = `chat-${toPeerId}`;
+        
         try {
-            await node.services.pubsub.publish(topic, new TextEncoder().encode(content));
-            console.log(`Published message to ${topic}: from ${toPeerId}`, content);
+            // Check if the peer is connected
+            const connections = node.getConnections(toPeerId);
+            
+            if (connections.length === 0) {
+                console.log(`Peer ${toPeerId} not connected, attempting to dial...`);
+                
+                // Try to find the peer in the peerstore
+                const peerInfo = await node.peerStore.get(toPeerId).catch(() => null);
+                
+                if (peerInfo && peerInfo.addresses.length > 0) {
+                    // Try to connect to the peer
+                    await node.dial(toPeerId);
+                    console.log(`Successfully connected to ${toPeerId}`);
+                } else {
+                    throw new Error(`Peer ${toPeerId} not found in peerstore`);
+                }
+            }
+
+            // Wait a bit for the connection to stabilize
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Publish the message to the recipient's topic
+            await node.services.pubsub.publish(
+                topic, 
+                new TextEncoder().encode(content)
+            );
+            
+            console.log(`Published message to topic ${topic}:`, content);
         } catch (err) {
-            console.error(`Error publishing message to ${topic}: `, err);
+            console.error(`Error publishing message to ${topic}:`, err.message);
+            throw err;
         }
     };
 
