@@ -23,7 +23,7 @@ export const getPersistentUserId = async (): Promise<string> => {
 };
 
 export const CreateSocket = (socket: WebSocket | null, userId: string, dispatch: AppDispatch, setSocket: React.Dispatch<React.SetStateAction<WebSocket | null>>) => {
-    socket = new WebSocket('ws://localhost:8080');
+    socket = new WebSocket('https://echocash-2.onrender.com');
     console.log("Socket created:", socket);
 
     socket.onopen = () => {

@@ -1,157 +1,65 @@
+// Updated Main.tsx with global ecash receiving
 import Taskbar from '../components/Taskbar';
 import Sidebar from '../components/Sidebar';
-import { useEffect, useState, useContext } from 'react';
-import { openDB } from 'idb';
-import { useSelector } from 'react-redux';
-import type { RootState } from '../redux/store';
-import SocketContext from '../context/socket';
+import { useState, useEffect } from 'react';
 import { Outlet } from 'react-router';
 import Header from '../components/Header';
 import { useCashuWallet } from '../context/cashu';
 import { useFedimintWallet } from '../context/fedimint';
-
+import { ReceiveEcash } from '../services/TransferFund';
 
 export default function Main() {
     const [postBox, setPostBox] = useState<boolean>(false);
     const [audience, setAudience] = useState<'public' | 'all' | 'specific' | null>(null);
     const [message, setMessage] = useState<string>('');
-    const onlinePeers = useSelector((state: RootState) => state.Peers.peerId);
-    const { socket, persistentUserId } = useContext(SocketContext);
-    const {CocoManager}=useCashuWallet()
-    const {Fedimintwallet}=useFedimintWallet()
+    const { CocoManager, isCashuWalletInitialized } = useCashuWallet()
+    const { Fedimintwallet, isFedWalletInitialized } = useFedimintWallet()
 
-
+    // Global ecash receiver - listens to ALL incoming messages
     useEffect(() => {
-        const deliverPendingMessages = async () => {
-            const db = await openDB('p2pchats', 1);
+        const handleGlobalEcash = async (event: any) => {
+            const { from, content } = event.detail;
 
-            // Use persistent user ID for pending messages
-            for (const peer of onlinePeers) {
-                const key = [persistentUserId, peer];
-                const pending = await db.get('pendingMessages', key);
-                if (pending && pending.messages.length > 0) {
-                    for (const msg of pending.messages) {
-                        socket?.send(JSON.stringify({
-                            type: 'message',
-                            to: peer,
-                            content: msg.content,
-                            from: persistentUserId
-                        }));
+            try {
+                const data = JSON.parse(content);
+                
+                if (data.type === 'fedimint' || data.type === 'cashu') {
+                    console.log('💰 MAIN: Received ecash from:', from);
+
+                    // Check if wallets are initialized
+                    if (data.type === 'fedimint' && !isFedWalletInitialized) {
+                        console.error('Fedimint wallet not initialized');
+                        alert('Cannot receive Fedimint payment - wallet not initialized');
+                        return;
                     }
-                    await db.delete('pendingMessages', key);
+                    if (data.type === 'cashu' && !isCashuWalletInitialized) {
+                        console.error('Cashu wallet not initialized');
+                        alert('Cannot receive Cashu payment - wallet not initialized');
+                        return;
+                    }
+
+                    // Automatically receive the ecash
+                    const result = await ReceiveEcash(data, Fedimintwallet, CocoManager);
+
+                    if (result.success) {
+                        // Show notification
+                        alert(`✅ Received ${result.amount} sats via ${result.type} from ${from.slice(0, 12)}...`);
+                        
+                        // Optional: Play notification sound or show toast
+                        console.log(`💰 Successfully received ${result.amount} sats`);
+                    }
                 }
+            } catch (error) {
+                // Not an ecash message, ignore
             }
         };
 
-        if (persistentUserId && onlinePeers.length > 0) {
-            deliverPendingMessages();
-        }
-    }, [onlinePeers, persistentUserId]);
-
-    const handlePostSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        console.log('audience', audience, message, persistentUserId)
-
-        if (!audience || !message.trim() || !persistentUserId) {
-            alert('Please select audience and enter a message.');
-            return;
-        }
-
-        const db = await openDB('p2pchats', 1);
-        const timestamp = Date.now();
-
-        // Create the post object
-        const newPost = {
-            from: persistentUserId,
-            content: message,
-            timestamp: timestamp
-        };
-
-        // Immediately add to local feed
-        if (typeof window !== 'undefined' && (window as any).addPublicPostToFeed) {
-            (window as any).addPublicPostToFeed(newPost);
-        }
-
-        // If there are connected peers, send the message to all
-        if (onlinePeers && onlinePeers.length > 0) {
-            console.log('peer is connected sending message')
-            socket?.send(JSON.stringify({
-                type: 'public-post',
-                from: persistentUserId,
-                content: message,
-                timestamp: timestamp
-            }));
-        } else {
-            // If no connected peers, save to pendingMessages for all previous known peers
-            const prevChat = await db.get('prevChat', persistentUserId);
-            const previousPeers: string[] = prevChat?.peers || [];
-            console.log('no peer found storing it for further events', previousPeers)
-
-            for (const peer of previousPeers) {
-                const key = [persistentUserId, peer];
-                const existing = await db.get('pendingMessages', key);
-                const newMsg = {
-                    content: `[Public Post]: ${message}`,
-                    timestamp: timestamp
-                };
-
-                if (existing) {
-                    existing.messages.push(newMsg);
-                    await db.put('pendingMessages', existing);
-                } else {
-                    await db.put('pendingMessages', {
-                        from: persistentUserId,
-                        to: peer,
-                        messages: [newMsg]
-                    });
-                }
-            }
-        }
-
-        setMessage('');
-        setAudience(null);
-        setPostBox(false);
-    };
-
-    useEffect(() => {
-        if (!socket) return;
-        
-        socket.onmessage = async (event: MessageEvent) => {
-            const data = JSON.parse(event.data);
-
-            if (data.type === "ecash-send") {
-                const { notes, type, amount } = data.content;
-
-                if (type === 'cashu') {
-                    await CocoManager?.wallet.receive(notes);
-
-                    socket.send(JSON.stringify({
-                        type: "ecash-ack",
-                        to: data.from,
-                        from: persistentUserId,
-                        content: "redeemed"
-                    }));
-
-                    alert(`Received ${amount} sats`);
-                } else {
-                    await Fedimintwallet?.mint.redeemEcash(notes);
-
-                    socket.send(JSON.stringify({
-                        type: "ecash-ack",
-                        to: data.from,
-                        from: persistentUserId,
-                        content: "redeemed"
-                    }));
-
-                    alert(`Received ${amount} sats`);
-                }
-            }
-        };
+        window.addEventListener('p2p-message', handleGlobalEcash);
 
         return () => {
-            if (socket) socket.onmessage = null;
+            window.removeEventListener('p2p-message', handleGlobalEcash);
         };
-    }, [socket, Fedimintwallet, CocoManager, persistentUserId])
+    }, [Fedimintwallet, CocoManager, isFedWalletInitialized, isCashuWalletInitialized]);
 
     return (
         <main className='mainchatContent'>
@@ -160,7 +68,7 @@ export default function Main() {
                     <div>
                         <h3>Write a Post</h3>
                         <p>Choose where to post your message.</p>
-                        <form onSubmit={handlePostSubmit}>
+                        <form>
                             <label>
                                 <input
                                     type="radio"

@@ -1,10 +1,11 @@
+// src/App.tsx
 import './style/App.css';
 import { BrowserRouter, Routes, Route } from 'react-router';
 import { useEffect, useState, useRef } from 'react';
 import { initialize, isInitialized } from '@fedimint/core-web';
 import Home from './pages/Home';
 import Chat from './Chat';
-import { SoecketProvider } from './context/socket';
+import { P2PProvider } from './context/P2PContext';
 import { FedimintProvider } from './context/fedimint';
 import { CashuProvider } from './context/cashu';
 import 'nprogress/nprogress.css';
@@ -38,10 +39,8 @@ function AppInitializer({ children }: { children: React.ReactNode }) {
                 if (!isInitialized()) {
                     await initialize();
                 }
-
                 globalAppState.isInitialized = true;
                 setReady(true);
-
             } catch (err) {
                 console.error('Initialization failed:', err);
                 globalAppState.isInitialized = true;
@@ -69,7 +68,7 @@ function AppInitializer({ children }: { children: React.ReactNode }) {
 function App() {
     return (
         <BrowserRouter>
-            <SoecketProvider>
+            <P2PProvider>
                 <FedimintProvider>
                     <CashuProvider>
                         <AppInitializer>
@@ -80,7 +79,7 @@ function App() {
                         </AppInitializer>
                     </CashuProvider>
                 </FedimintProvider>
-            </SoecketProvider>
+            </P2PProvider>
         </BrowserRouter>
     );
 }

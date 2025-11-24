@@ -115,3 +115,10 @@ export type OnchainTxDetail = {
         block_time?: number;
     };
 };
+
+
+export interface Peer {
+    peerId: string
+    displayName: string
+    isConnected: boolean
+}

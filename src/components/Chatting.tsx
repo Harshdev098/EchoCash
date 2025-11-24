@@ -78,7 +78,6 @@ export default function Chatting() {
 
   return (
     <div className="chatting-container">
-      {/* Top Bar */}
       <div className="top-bar">
         <button 
           onClick={() => navigate('/chat')} 
@@ -123,7 +122,6 @@ export default function Chatting() {
         </div>
       </div>
 
-      {/* Message Input */}
       <div className="input-container">
         <form onSubmit={handleSendMessage} className="message-form">
           <div className="input-wrapper">
