@@ -1,19 +1,24 @@
 import { useEffect, useState } from 'react';
-import { useSelector } from 'react-redux';
-import type { RootState } from '../redux/store';
 import { openDB } from 'idb';
 import { Link, useNavigate } from 'react-router';
 import { v4 as uuidv4 } from 'uuid';
 import { getDB } from './db';
+import { useP2P } from '../context/P2PContext';
+
+interface PreviousPeer {
+    peerId: string
+    displayName: string
+    isOnline: boolean
+}
 
 export default function Sidebar() {
-    const userId = useSelector((state: RootState) => state.Peers.UserId);
-    const [previousPeers, setPreviousPeers] = useState<string[]>([]);
+    const [previousPeers, setPreviousPeers] = useState<PreviousPeer[]>([]);
     const [joinedCommunities, setJoinedCommunities] = useState<{ cID: string; cName: string }[]>([]);
     const [activeCommunities, setActiveCommunities] = useState<{ cID: string; cName: string }[]>([]);
     const [persistentUserId, setPersistentUserId] = useState<string>('');
     const [isOpen, setIsOpen] = useState<boolean>(true)
-    const onlinePeers = useSelector((state: RootState) => state.Peers.peerId);
+    
+    const { peers: onlinePeers } = useP2P()
     const navigate = useNavigate()
 
     // Get or create persistent user ID
@@ -35,33 +40,16 @@ export default function Sidebar() {
         return userProfile.persistentUserId;
     };
 
-    // Map current peer ID to persistent user ID
-    const mapPeerIdToUser = async (peerId: string, persistentUserId: string) => {
-        const db = await openDB('p2pchats', 1);
-        await db.put('peerMapping', {
-            peerId,
-            persistentUserId,
-            timestamp: Date.now()
-        });
-    };
-
-    // Get persistent user ID from peer ID
-    const getPersistentUserIdFromPeer = async (peerId: string): Promise<string | null> => {
-        const db = await openDB('p2pchats', 1);
-        const mapping = await db.get('peerMapping', peerId);
-        return mapping?.persistentUserId || null;
-    };
-
     const handleCreateCommunity = async () => {
         const cName = prompt("Enter the name of community");
         if (cName && persistentUserId) {
-            const db = await openDB('p2pchats', 1);
+            const db = await openDB('p2pchats', 2);
             const cID = `${Date.now()}`;
 
             const community = {
                 cID,
                 cName,
-                joinedPeers: [persistentUserId] // Use persistent ID
+                joinedPeers: [persistentUserId]
             };
 
             await db.put('community', community);
@@ -75,8 +63,13 @@ export default function Sidebar() {
         const code = prompt('Enter the community code (cID):');
         if (!code || !persistentUserId) return;
 
-        const db = await openDB('p2pchats', 1);
+        const db = await openDB('p2pchats', 2);
         const community = await db.get('community', code);
+
+        if (!community) {
+            alert('Community not found');
+            return;
+        }
 
         if (!community.joinedPeers.includes(persistentUserId)) {
             community.joinedPeers.push(persistentUserId);
@@ -94,73 +87,75 @@ export default function Sidebar() {
     const fetchPreviousChats = async () => {
         if (!persistentUserId) return;
 
-        const db = await openDB('p2pchats', 1);
-        const prevChat = await db.get('prevChat', persistentUserId);
-
-        if (prevChat && prevChat.peers) {
-            // Convert peer IDs to display names
-            await Promise.all(
-                prevChat.peers.map(async (peerId: string) => {
-                    const persistentId = await getPersistentUserIdFromPeer(peerId);
-                    return persistentId ? `${persistentId.slice(0, 8)}...` : `${peerId.slice(0, 8)}...`;
-                })
-            );
-            setPreviousPeers(prevChat.peers);
+        try {
+            const db = await openDB('p2pchats', 2);
+            
+            // Get all known peers
+            const knownPeers = await db.getAll('knownPeers');
+            
+            // Check which ones are online
+            const peersWithStatus: PreviousPeer[] = knownPeers.map(peer => ({
+                peerId: peer.peerId,
+                displayName: peer.displayName,
+                isOnline: onlinePeers.some(p => p.peerId === peer.peerId && p.isConnected)
+            }));
+            
+            // Sort by online first, then alphabetically
+            peersWithStatus.sort((a, b) => {
+                if (a.isOnline && !b.isOnline) return -1;
+                if (!a.isOnline && b.isOnline) return 1;
+                return a.displayName.localeCompare(b.displayName);
+            });
+            
+            setPreviousPeers(peersWithStatus);
+            console.log('📋 Loaded previous peers:', peersWithStatus.length);
+        } catch (error) {
+            console.error('Error fetching previous chats:', error);
         }
     };
 
     const fetchUserCommunities = async () => {
         if (!persistentUserId) return;
 
-        const db = await openDB('p2pchats', 1);
-        const tx = db.transaction('community', 'readonly');
-        const store = tx.objectStore('community');
-        const allCommunities = await store.getAll();
+        try {
+            const db = await openDB('p2pchats', 2);
+            const tx = db.transaction('community', 'readonly');
+            const store = tx.objectStore('community');
+            const allCommunities = await store.getAll();
 
-        const joined = [];
-        const active = [];
+            const joined = [];
+            const active = [];
 
-        for (const comm of allCommunities) {
-            if (comm.joinedPeers.includes(persistentUserId)) {
-                joined.push({ cID: comm.cID, cName: comm.cName });
+            for (const comm of allCommunities) {
+                if (comm.joinedPeers && comm.joinedPeers.includes(persistentUserId)) {
+                    joined.push({ cID: comm.cID, cName: comm.cName });
 
-                // Check if any of the community members are currently online
-                const onlineMembers = await Promise.all(
-                    comm.joinedPeers.map(async (persistentId: string) => {
-                        // Get current peer IDs for this persistent user
-                        const db = await openDB('p2pchats', 1);
-                        const tx = db.transaction('peerMapping', 'readonly');
-                        const mappings = await tx.store.getAll();
-                        return mappings.some(m =>
-                            m.persistentUserId === persistentId &&
-                            onlinePeers.includes(m.peerId)
-                        );
-                    })
-                );
+                    // Check if any community members are online
+                    const onlineCount = comm.joinedPeers.filter((pId: string) => 
+                        onlinePeers.some(p => p.peerId === pId && p.isConnected)
+                    ).length;
 
-                if (onlineMembers.filter(Boolean).length >= 2) {
-                    active.push({ cID: comm.cID, cName: comm.cName });
+                    if (onlineCount >= 2) {
+                        active.push({ cID: comm.cID, cName: comm.cName });
+                    }
                 }
             }
-        }
 
-        setJoinedCommunities(joined);
-        setActiveCommunities(active);
+            setJoinedCommunities(joined);
+            setActiveCommunities(active);
+        } catch (error) {
+            console.error('Error fetching communities:', error);
+        }
     };
 
     useEffect(() => {
         const initializePersistentId = async () => {
             const persistentId = await getPersistentUserId();
             setPersistentUserId(persistentId);
-
-            // Map current peer ID to persistent user ID
-            if (userId) {
-                await mapPeerIdToUser(userId, persistentId);
-            }
         };
 
         initializePersistentId();
-    }, [userId]);
+    }, []);
 
     useEffect(() => {
         if (persistentUserId) {
@@ -182,7 +177,7 @@ export default function Sidebar() {
 
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
-    }, [window.innerWidth]);
+    }, []);
 
     return (
         <>
@@ -206,9 +201,12 @@ export default function Sidebar() {
                 )}
 
                 <div className='user-info-card'>
-                    <p className='user-label'>Your ID</p>
-                    <div className='user-id'>{persistentUserId}</div>
+                    <p className='user-label'>Your Persistent ID</p>
+                    <div className='user-id' title={persistentUserId}>
+                        {persistentUserId.slice(0, 20)}...
+                    </div>
                 </div>
+
                 <div className='action-btn'>
                     <button onClick={handleCreateCommunity}>
                         <i className="fa-solid fa-plus"></i> Build Community
@@ -218,6 +216,7 @@ export default function Sidebar() {
                         <i className="fa-solid fa-plus"></i> Join Community
                     </button>
                 </div>
+
                 <div className='section'>
                     <p className='sidebar-title'>
                         Active Communities
@@ -231,6 +230,7 @@ export default function Sidebar() {
                         )}
                     </ul>
                 </div>
+
                 <div className='section'>
                     <p className='sidebar-title'>Joined Communities</p>
                     <ul className='sidebar-list'>
@@ -241,11 +241,22 @@ export default function Sidebar() {
                         )}
                     </ul>
                 </div>
+
                 <div className='section'>
-                    <p className='sidebar-title'>Previous Chats</p>
+                    <p className='sidebar-title'>
+                        Previous Chats 💬
+                        {previousPeers.length > 0 && (
+                            <span className="peer-count-badge">{previousPeers.length}</span>
+                        )}
+                    </p>
                     <ul className='sidebar-list'>
-                        {previousPeers.length > 0 ? previousPeers.map((peerId, key) => (
-                            <li key={key}><Link to={`/chat/p/${peerId}`}>{peerId.slice(0, 20)}...</Link></li>
+                        {previousPeers.length > 0 ? previousPeers.map((peer, key) => (
+                            <li key={key} className={peer.isOnline ? 'peer-online' : ''}>
+                                <Link to={`/chat/p/${peer.peerId}`}>
+                                    {peer.isOnline && <span className="online-dot">●</span>}
+                                    {peer.displayName}
+                                </Link>
+                            </li>
                         )) : (
                             <li className="empty">No previous chat found</li>
                         )}

@@ -1,4 +1,54 @@
-// Fixed P2PConnection.ts - Handles glare and connection issues
+import { openDB } from 'idb'
+
+class MessageEncryption {
+    private key: CryptoKey | null = null
+
+    async initialize(password: string = 'echosphere-p2p-secret') {
+        const encoder = new TextEncoder()
+        const keyMaterial = await crypto.subtle.importKey(
+            'raw',
+            encoder.encode(password),
+            'PBKDF2',
+            false,
+            ['deriveBits', 'deriveKey']
+        )
+
+        this.key = await crypto.subtle.deriveKey(
+            {
+                name: 'PBKDF2',
+                salt: encoder.encode('echosphere-salt-2024'),
+                iterations: 100000,
+                hash: 'SHA-256'
+            },
+            keyMaterial,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+        )
+    }
+
+    async encrypt(message: string): Promise<string> {
+        if (!this.key) throw new Error('Encryption not initialized')
+        const encoder = new TextEncoder()
+        const data = encoder.encode(message)
+        const iv = crypto.getRandomValues(new Uint8Array(12))
+        const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this.key, data)
+        const combined = new Uint8Array(iv.length + encrypted.byteLength)
+        combined.set(iv, 0)
+        combined.set(new Uint8Array(encrypted), iv.length)
+        return btoa(String.fromCharCode(...combined))
+    }
+
+    async decrypt(encryptedMessage: string): Promise<string> {
+        if (!this.key) throw new Error('Encryption not initialized')
+        const combined = Uint8Array.from(atob(encryptedMessage), c => c.charCodeAt(0))
+        const iv = combined.slice(0, 12)
+        const data = combined.slice(12)
+        const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this.key, data)
+        return new TextDecoder().decode(decrypted)
+    }
+}
+
 export class P2PConnection {
     private ws: WebSocket | null = null
     private persistentUserId: string
@@ -8,6 +58,9 @@ export class P2PConnection {
     private makingOffer: Map<string, boolean> = new Map()
     private ignoreOffer: Map<string, boolean> = new Map()
     private isSettingRemoteAnswerPending: Map<string, boolean> = new Map()
+    private encryption = new MessageEncryption()
+    private reconnectTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map()
+    private signalingServerUrl: string = ''
     
     private onPeerDiscovered?: (peerId: string, displayName: string) => void
     private onMessageReceived?: (from: string, content: string) => void
@@ -31,6 +84,10 @@ export class P2PConnection {
     }
 
     async connect(signalingServerUrl: string, displayName?: string) {
+        this.signalingServerUrl = signalingServerUrl
+        await this.encryption.initialize()
+        console.log('🔐 Encryption initialized')
+
         return new Promise((resolve, reject) => {
             console.log('🔌 Connecting to signaling server:', signalingServerUrl)
             this.ws = new WebSocket(signalingServerUrl)
@@ -62,20 +119,24 @@ export class P2PConnection {
 
             this.ws.onclose = () => {
                 console.log('🔌 Disconnected from signaling server')
-                this.cleanup()
+                // Auto-reconnect to signaling server
+                setTimeout(() => {
+                    console.log('🔄 Attempting to reconnect to signaling server...')
+                    this.connect(signalingServerUrl, displayName)
+                }, 3000)
             }
         })
     }
 
     private handleSignalingMessage(message: any) {
-        console.log('📩 Received signaling message:', message.type, message)
+        console.log('📩 Received signaling message:', message.type)
 
         switch (message.type) {
             case 'peer-list':
-                console.log('👥 Received peer list:', message.peers)
                 message.peers.forEach((peer: any) => {
                     console.log('🔍 Discovered peer:', peer.peerId, peer.displayName)
                     this.onPeerDiscovered?.(peer.peerId, peer.displayName)
+                    this.savePeerToDatabase(peer.peerId, peer.displayName)
                     setTimeout(() => this.initiateConnection(peer.peerId), 100)
                 })
                 break
@@ -83,6 +144,7 @@ export class P2PConnection {
             case 'peer-joined':
                 console.log('👋 New peer joined:', message.peerId, message.displayName)
                 this.onPeerDiscovered?.(message.peerId, message.displayName)
+                this.savePeerToDatabase(message.peerId, message.displayName)
                 setTimeout(() => this.initiateConnection(message.peerId), 100)
                 break
 
@@ -93,28 +155,54 @@ export class P2PConnection {
                 break
 
             case 'offer':
-                console.log('📞 Received offer from:', message.from)
                 this.handleOffer(message.from, message.data)
                 break
 
             case 'answer':
-                console.log('✅ Received answer from:', message.from)
                 this.handleAnswer(message.from, message.data)
                 break
 
             case 'ice-candidate':
-                console.log('🧊 Received ICE candidate from:', message.from)
                 this.handleIceCandidate(message.from, message.data)
                 break
 
             case 'message':
-                console.log('💬 Received relayed message from:', message.from)
-                this.onMessageReceived?.(message.from, message.content)
+                this.handleEncryptedMessage(message.from, message.content)
                 break
 
             case 'error':
                 console.error('❌ Server error:', message.message)
                 break
+        }
+    }
+
+    private async savePeerToDatabase(peerId: string, displayName: string) {
+        try {
+            const db = await openDB('p2pchats', 1)
+
+            await db.put('knownPeers', {
+                peerId: peerId, // Use persistent ID
+                displayName: displayName,
+                lastSeen: Date.now()
+            })
+            
+            // Update prevChat for sidebar
+            const prevChat = await db.get('prevChat', this.persistentUserId)
+            if (prevChat) {
+                if (!prevChat.peers.includes(peerId)) {
+                    prevChat.peers.push(peerId)
+                    await db.put('prevChat', prevChat)
+                }
+            } else {
+                await db.put('prevChat', {
+                    userID: this.persistentUserId,
+                    peers: [peerId]
+                })
+            }
+            
+            console.log('💾 Saved peer to database:', peerId)
+        } catch (error) {
+            console.error('Error saving peer:', error)
         }
     }
 
@@ -124,7 +212,6 @@ export class P2PConnection {
             return
         }
 
-        // Use polite peer strategy: lower ID is polite
         const polite = this.persistentUserId < peerId
         console.log(`🚀 Initiating connection with ${peerId} (${polite ? 'polite' : 'impolite'})`)
         
@@ -165,7 +252,7 @@ export class P2PConnection {
         const polite = this.persistentUserId < from
         
         if (!pc) {
-            console.log('🆕 Creating new peer connection for', from, `(${polite ? 'polite' : 'impolite'})`)
+            console.log('🆕 Creating new peer connection for', from)
             pc = this.createPeerConnection(from, polite)
 
             pc.ondatachannel = (event) => {
@@ -181,7 +268,7 @@ export class P2PConnection {
         this.ignoreOffer.set(from, !polite && offerCollision)
         
         if (this.ignoreOffer.get(from)) {
-            console.log('🚫 Ignoring offer from', from, '(impolite, collision)')
+            console.log('🚫 Ignoring offer from', from, '(collision)')
             return
         }
 
@@ -189,7 +276,6 @@ export class P2PConnection {
             await pc.setRemoteDescription(offer)
             console.log('✅ Set remote description for', from)
 
-            // Process pending ICE candidates
             const pending = this.pendingCandidates.get(from) || []
             for (const candidate of pending) {
                 await pc.addIceCandidate(candidate)
@@ -199,7 +285,6 @@ export class P2PConnection {
             const answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
 
-            console.log('📤 Sending answer to', from)
             this.ws?.send(JSON.stringify({
                 type: 'answer',
                 to: from,
@@ -259,30 +344,38 @@ export class P2PConnection {
         const pc = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
             ],
-            iceCandidatePoolSize: 10
+            iceCandidatePoolSize: 10,
+            bundlePolicy: 'max-bundle',
+            rtcpMuxPolicy: 'require',
+            iceTransportPolicy: 'all'
         })
 
         pc.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log('🧊 Sending ICE candidate to', peerId, event.candidate.type)
                 this.ws?.send(JSON.stringify({
                     type: 'ice-candidate',
                     to: peerId,
                     data: event.candidate
                 }))
-            } else {
-                console.log('🏁 All ICE candidates sent for', peerId)
             }
         }
 
         pc.oniceconnectionstatechange = () => {
-            console.log(`🔌 ICE connection state with ${peerId}:`, pc.iceConnectionState)
+            console.log(`🔌 ICE state with ${peerId}:`, pc.iceConnectionState)
             
             if (pc.iceConnectionState === 'failed') {
                 console.log('🔄 ICE failed, restarting...')
                 pc.restartIce()
+                // Schedule reconnection attempt
+                this.scheduleReconnect(peerId)
+            } else if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                console.log('✅ ICE connected with', peerId)
+                // Clear any scheduled reconnects
+                this.clearReconnect(peerId)
             }
         }
 
@@ -292,40 +385,59 @@ export class P2PConnection {
             if (pc.connectionState === 'connected') {
                 console.log('✅ P2P connection established with', peerId)
                 this.onPeerConnected?.(peerId)
+                this.clearReconnect(peerId)
             } else if (pc.connectionState === 'disconnected') {
-                console.log('⚠️ P2P connection disconnected with', peerId)
-                // Don't immediately close - might reconnect
-                setTimeout(() => {
-                    if (pc.connectionState === 'disconnected') {
-                        this.onPeerDisconnected?.(peerId)
-                    }
-                }, 5000)
+                console.log('⚠️ P2P disconnected with', peerId)
+                this.scheduleReconnect(peerId)
             } else if (pc.connectionState === 'failed') {
-                console.log('❌ P2P connection failed with', peerId)
-                this.closePeerConnection(peerId)
-                this.onPeerDisconnected?.(peerId)
+                console.log('❌ P2P failed with', peerId)
+                this.scheduleReconnect(peerId)
             }
-        }
-
-        pc.onicegatheringstatechange = () => {
-            console.log(`🧊 ICE gathering state with ${peerId}:`, pc.iceGatheringState)
         }
 
         this.peers.set(peerId, pc)
         return pc
     }
 
+    private scheduleReconnect(peerId: string) {
+        // Clear existing timeout
+        this.clearReconnect(peerId)
+        
+        console.log(`🔄 Scheduling reconnect for ${peerId} in 5 seconds...`)
+        
+        const timeout = setTimeout(() => {
+            console.log(`🔄 Attempting to reconnect to ${peerId}...`)
+            
+            // Close old connection
+            this.closePeerConnection(peerId)
+            
+            // Try to reconnect
+            this.initiateConnection(peerId)
+        }, 5000)
+        
+        this.reconnectTimeouts.set(peerId, timeout)
+    }
+
+    private clearReconnect(peerId: string) {
+        const timeout = this.reconnectTimeouts.get(peerId)
+        if (timeout) {
+            clearTimeout(timeout)
+            this.reconnectTimeouts.delete(peerId)
+            console.log(`✅ Cleared reconnect timeout for ${peerId}`)
+        }
+    }
+
     private setupDataChannel(peerId: string, channel: RTCDataChannel) {
-        console.log('📡 Setting up data channel with', peerId, 'state:', channel.readyState)
+        console.log('📡 Setting up data channel with', peerId)
 
         channel.onopen = () => {
             console.log('✅ Data channel opened with', peerId)
             this.onPeerConnected?.(peerId)
         }
 
-        channel.onmessage = (event) => {
-            console.log('💬 Received P2P message from', peerId)
-            this.onMessageReceived?.(peerId, event.data)
+        channel.onmessage = async (event) => {
+            console.log('💬 Received encrypted message from', peerId)
+            await this.handleEncryptedMessage(peerId, event.data)
         }
 
         channel.onerror = (error) => {
@@ -335,25 +447,55 @@ export class P2PConnection {
         channel.onclose = () => {
             console.log('🔌 Data channel closed with', peerId)
             this.dataChannels.delete(peerId)
+            this.onPeerDisconnected?.(peerId)
+            this.scheduleReconnect(peerId)
         }
 
         this.dataChannels.set(peerId, channel)
+    }
+
+    private async handleEncryptedMessage(from: string, encryptedContent: string) {
+        try {
+            const decrypted = await this.encryption.decrypt(encryptedContent)
+            console.log('🔓 Decrypted message from', from)
+            this.onMessageReceived?.(from, decrypted)
+        } catch (error) {
+            // Fallback to unencrypted
+            this.onMessageReceived?.(from, encryptedContent)
+        }
     }
 
     async sendMessage(toPeerId: string, content: string): Promise<boolean> {
         const channel = this.dataChannels.get(toPeerId)
         
         if (channel && channel.readyState === 'open') {
-            channel.send(content)
-            console.log('✅ Sent P2P message to', toPeerId)
-            return true
+            try {
+                const encrypted = await this.encryption.encrypt(content)
+                channel.send(encrypted)
+                console.log('✅ Sent encrypted P2P message to', toPeerId)
+                return true
+            } catch (error) {
+                console.error('❌ Encryption error:', error)
+                channel.send(content)
+                return true
+            }
         } else {
-            console.log('⚠️ P2P channel not open, using server relay for', toPeerId)
-            this.ws?.send(JSON.stringify({
-                type: 'message',
-                to: toPeerId,
-                content: content
-            }))
+            console.log('⚠️ P2P channel not open, using server relay')
+            
+            try {
+                const encrypted = await this.encryption.encrypt(content)
+                this.ws?.send(JSON.stringify({
+                    type: 'message',
+                    to: toPeerId,
+                    content: encrypted
+                }))
+            } catch (error) {
+                this.ws?.send(JSON.stringify({
+                    type: 'message',
+                    to: toPeerId,
+                    content: content
+                }))
+            }
             return false
         }
     }
@@ -392,6 +534,11 @@ export class P2PConnection {
 
     private cleanup() {
         console.log('🧹 Cleaning up all connections')
+        
+        // Clear all reconnect timeouts
+        this.reconnectTimeouts.forEach(timeout => clearTimeout(timeout))
+        this.reconnectTimeouts.clear()
+        
         this.peers.forEach((pc, peerId) => {
             this.closePeerConnection(peerId)
         })

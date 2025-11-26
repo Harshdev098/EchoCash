@@ -108,13 +108,12 @@ export default function Fedimint() {
 
     return (
         <>
+            {/* Join Federation Modal – unchanged */}
             {openJoinFedForm && (
                 <>
                     <div className="fm-overlay" onClick={() => setOpenJoinFedForm(false)} />
-
                     <div className="fm-modal">
                         <h3 className="fm-modal-title">Join a Federation</h3>
-
                         <input
                             type="text"
                             className="fm-input"
@@ -122,91 +121,129 @@ export default function Fedimint() {
                             value={inviteCode || ""}
                             onChange={(e) => setInviteCode(e.target.value)}
                         />
-
                         <button className="fm-primary-btn" onClick={JoinFederation}>
                             Join Federation
                         </button>
-
-                        <div className="fm-divider" />
-
-                        <h4 className="fm-random-title">Suggested Federations</h4>
-
-                        <ul className="fm-fed-list">
-                            <li className="fm-fed-item">🌿 MintHub Test Federation</li>
-                            <li className="fm-fed-item">🍃 GreenLeaf Community Mint</li>
-                            <li className="fm-fed-item">🌱 Fedi village (Open)</li>
-                        </ul>
                     </div>
                 </>
             )}
 
-            {openFundForm ? <AddFund setOpenFundForm={setOpenFundForm} /> : null}
-            {transferForm ? <Transfer setTransferForm={setTransferForm} /> : null}
+            {openFundForm && <AddFund setOpenFundForm={setOpenFundForm} />}
+            {transferForm && <Transfer setTransferForm={setTransferForm} />}
 
             <div className="fm-container">
                 {!isFedWalletInitialized ? (
-                    <>
-                        <section className="fm-card fm-center">
-                            <p className="fm-subtext">
-                                Activate your wallet by joining a federation &nbsp;
-                                <Link to={'/chat/settings#faq'} className="fm-link">Learn more</Link>.
-                            </p>
-
-                            <button className="fm-primary-btn" onClick={() => setOpenJoinFedForm(true)}>
-                                <i className="fa-solid fa-plus"></i> Activate Wallet
-                            </button>
-                        </section>
-                    </>
+                    <section className="fm-card fm-welcome-card">
+                        <i className="fa-solid fa-wallet fm-welcome-icon"></i>
+                        <h2 className="fm-welcome-title">Welcome to Your Fedimint Wallet</h2>
+                        <p className="fm-subtext">
+                            Join a trusted federation to activate your private, lightning-fast wallet. &nbsp;
+                            <Link to="/chat/settings#faq" className="fm-link">Learn more</Link>
+                        </p>
+                        <button className="fm-primary-btn fm-activate-btn" onClick={() => setOpenJoinFedForm(true)}>
+                            <i className="fa-solid fa-plus"></i> Activate Wallet
+                        </button>
+                    </section>
                 ) : (
                     <>
-                        <section className="fm-card fm-center">
-                            <h2 className="fm-balance">{FedBalance+cashuBalance} SAT</h2>
-                            <div className="fm-btns">
-                                <button className="fm-secondary-btn" onClick={() => setOpenFundForm(true)}><i className="fa-solid fa-arrow-down-long"></i> Add Funds</button>
-                                <button className="fm-secondary-btn" onClick={() => setTransferForm(true)}><i className="fa-solid fa-location-arrow"></i> Transt to Peers</button>
+                        {/* Balance Card */}
+                        <section className="fm-card fm-balance-card">
+                            <div className="fm-balance-header">
+                                <span className="fm-balance-label">Total Balance</span>
+                                <h2 className="fm-balance-amount">
+                                    {FedBalance + cashuBalance} <span className="fm-balance-sats">SAT</span>
+                                </h2>
+                            </div>
+                            <div className="fm-action-buttons">
+                                <button className="fm-secondary-btn" onClick={() => setOpenFundForm(true)}>
+                                    <i className="fa-solid fa-arrow-down-long"></i> Receive
+                                </button>
+                                <button className="fm-secondary-btn" onClick={() => setTransferForm(true)}>
+                                    <i className="fa-solid fa-paper-plane"></i> Send to Peer
+                                </button>
                             </div>
                         </section>
 
-                        <section className="fm-card fm-center">
-                            <h4 className="fm-balance">Joined Federation</h4>
-                            <p>Federation name: {federationConfig?.meta.federation_name}</p>
-                            <p>Federation ID: {federationId}</p>
-                            <p>Number of guardians: {Object.keys(federationConfig?.api_endpoints ?? {}).length} </p>
+                        {/* Federation Info */}
+                        <section className="fm-card fm-federation-card">
+                            <h3 className="fm-section-title">
+                                <i className="fa-solid fa-shield-halved"></i> Joined Federation
+                            </h3>
+                            <div className="fm-federation-grid">
+                                <div>
+                                    <strong>Name:</strong><br />
+                                    {federationConfig?.meta.federation_name || 'Unknown'}
+                                </div>
+                                <div>
+                                    <strong>Federation ID:</strong><br />
+                                    <code className="fm-code">{federationId?.slice(0, 16)}...</code>
+                                </div>
+                                <div>
+                                    <strong>Guardians:</strong><br />
+                                    {Object.keys(federationConfig?.api_endpoints ?? {}).length} online
+                                </div>
+                            </div>
                         </section>
 
+                        {/* Transaction History */}
                         <section className="fm-card">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Sno</th>
-                                        <th>Operation ID</th>
-                                        <th>Type</th>
-                                        <th>Amount</th>
-                                        <th>Invoice</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {transaction.map((tx, idx) => (
-                                        <tr key={idx}>
-                                            <td>{idx + 1}</td>
-                                            <td>{tx.operationId.slice(0,18)}...</td>
-                                            <td>{tx.type}</td>
-                                            <td>{tx.amountMsats} sats</td>
-                                            <td>{tx.invoice?.slice(0,18).concat("...") ?? "—"}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </section>
+                            <div className="fm-section-header">
+                                <h3 className="fm-section-title">
+                                    <i className="fa-solid fa-history"></i> Recent Transactions
+                                </h3>
+                                {transaction.length > 0 && (
+                                    <span className="fm-tx-count">
+                                        {transaction.length} transaction{transaction.length > 1 ? 's' : ''}
+                                    </span>
+                                )}
+                            </div>
 
-                        <section>
-                            <h3>Your wallet details</h3>
-                            <p>Creation time: {walletCreationTime}</p>
-                            <p>seed phrases: {seedPhrase}</p>
+                            {transaction.length === 0 ? (
+                                <div className="fm-empty-state">
+                                    <i className="fa-solid fa-receipt"></i>
+                                    <p>No transactions yet</p>
+                                </div>
+                            ) : (
+                                <div className="fm-table-wrapper">
+                                    <table className="fm-table">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Operation</th>
+                                                <th>Type</th>
+                                                <th>Amount</th>
+                                                <th className="text-right">Invoice</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {transaction.map((tx, idx) => (
+                                                <tr key={idx}>
+                                                    <td>{idx + 1}</td>
+                                                    <td>
+                                                        <code className="fm-operation-id">
+                                                            {tx.operationId.slice(0, 12)}...
+                                                        </code>
+                                                    </td>
+                                                    <td>
+                                                        <span className={`fm-tx-badge fm-tx-${tx.kind}`}>
+                                                            {tx.kind === 'ln' ? 'Lightning' : tx.kind === 'mint' ? 'Ecash' : 'Wallet'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="fm-amount">
+                                                        {tx.amountMsats?.toLocaleString() || '—'} sats
+                                                    </td>
+                                                    <td className="text-right fm-mono">
+                                                        {tx.invoice ? `${tx.invoice.slice(0, 14)}...` : 'N/A'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
                         </section>
                     </>
                 )}
-
             </div>
         </>
     );
