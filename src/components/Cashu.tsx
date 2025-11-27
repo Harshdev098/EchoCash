@@ -20,7 +20,9 @@ export default function Cashu() {
             startProgress();
             if (!mintURL) throw new Error("Mint URL required");
             const info = await CocoManager?.mint.addMint(mintURL, { trusted: true });
-            localStorage.setMint('trustedMint', info?.mint.mintUrl ?? '');
+            const mintInfo=await CocoManager?.mint.getMintInfo(mintURL)
+            setMintInfo({ url: mintURL, name: mintInfo?.name, pubkey: mintInfo?.pubkey });
+            localStorage.setItem('trustedMint', info?.mint.mintUrl ?? '');
             setisCashuWalletInitialized(true);
         } catch (err) {
             console.error("Failed to add mint:", err);
@@ -35,6 +37,7 @@ export default function Cashu() {
             const mint = localStorage.getItem('trustedMint');
             if (mint && CocoManager) {
                 const info = await CocoManager.mint.getMintInfo(mint);
+                console.log("the mint info is ",info)
                 setMintInfo({ url: mint, name: info?.name, pubkey: info?.pubkey });
                 const tx = await CocoManager.history.getPaginatedHistory();
                 setTransaction(tx || []);
@@ -45,7 +48,6 @@ export default function Cashu() {
 
     return (
         <>
-            {/* Modal – unchanged */}
             {openJoinFedForm && (
                 <>
                     <div className="fm-overlay" onClick={() => setOpenJoinFedForm(false)} />
@@ -54,7 +56,7 @@ export default function Cashu() {
                         <input
                             type="text"
                             className="fm-input"
-                            placeholder="https://8333.space:3338"
+                            placeholder="Enter the mint URL"
                             value={mintURL || ""}
                             onChange={(e) => setMintURL(e.target.value)}
                         />

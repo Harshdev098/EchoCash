@@ -61,6 +61,7 @@ export default function AddFund({ setOpenFundForm }: AddFundProps) {
                         mintURL,
                         invoiceAmount
                     );
+                    setInvoice(quote?.quote ?? '')
 
                     console.log("Cashu mint quote", quote);
 
@@ -115,13 +116,13 @@ export default function AddFund({ setOpenFundForm }: AddFundProps) {
 
                 <h3 className="fund-modal-title">Deposit your Funds</h3>
 
-                {/* ========== ECASH MODE ========== */}
+                {/* ecash component */}
                 {fundMode && (
                     <>
                         <input
                             type="text"
                             className="fund-input"
-                            placeholder="Paste ecash notes..."
+                            placeholder="Paste ecash notes or tokens..."
                             value={ecashNotes || ""}
                             onChange={(e) => setEcashNotes(e.target.value)}
                         />
@@ -132,7 +133,7 @@ export default function AddFund({ setOpenFundForm }: AddFundProps) {
                     </>
                 )}
 
-                {/* ========== LIGHTNING MODE ========== */}
+                {/* ln component */}
                 {!fundMode && (
                     <>
                         <input
@@ -157,7 +158,7 @@ export default function AddFund({ setOpenFundForm }: AddFundProps) {
 
                         {invoice && (
                             <div className="fund-invoice-box">
-                                <p className="fund-invoice-label">Generated Invoice:</p>
+                                <p className="fund-invoice-label">Generated Invoice/quote:</p>
                                 <code className="fund-invoice-text">{invoice}</code>
                             </div>
                         )}

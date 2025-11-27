@@ -179,7 +179,7 @@ export default function PeerList() {
                                         </span>
                                     </div>
                                     <div className="peer-action">
-                                        <span className="chat-arrow">→</span>
+                                        <span className="chat-arrow"><i className="fa-solid fa-arrow-right-long"></i></span>
                                     </div>
                                 </Link>
                             ))}

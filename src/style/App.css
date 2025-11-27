@@ -784,9 +784,9 @@ body {
 .back-button {
   background: none;
   border: none;
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
-  padding: 8px 12px;
+  padding: 8px;
   border-radius: 6px;
   transition: background-color 0.2s;
   color: #6c757d;
@@ -828,8 +828,8 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background-color: #28a745;
   animation: pulse 2s infinite;
+  padding: 0 4px;
 }
 
 .online-text {
@@ -1281,7 +1281,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px;
+  padding: 12px;
   background: #f8f9fa;
   border: 1px solid #e9ecef;
   border-radius: 8px;

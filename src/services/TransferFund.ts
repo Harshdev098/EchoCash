@@ -48,8 +48,7 @@ export const TransferFunds = async (
 
             ecashData = {
                 type: "cashu",
-                proofs: result?.proofs,
-                mint: mintURL,
+                notes: result?.proofs,
                 amount: transferAmount,
                 from: persistentUserId,
                 timestamp: Date.now()

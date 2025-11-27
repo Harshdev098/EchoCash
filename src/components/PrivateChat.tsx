@@ -1,6 +1,6 @@
 import { openDB } from 'idb';
 import { useNavigate, useParams } from 'react-router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useP2P } from '../context/P2PContext';
 import { useFedimintWallet } from '../context/fedimint';
 import { useCashuWallet } from '../context/cashu';
@@ -15,6 +15,7 @@ export default function PrivateChat() {
     const [targetPersistentId, setTargetPersistentId] = useState<string>('');
     const [displayName, setDisplayName] = useState<string>('');
     const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+    const syncRequestedRef = useRef(false); // Prevent multiple sync requests
 
     const { persistentUserId, sendMessage, isP2PConnected, isConnected } = useP2P();
     const { Fedimintwallet, isFedWalletInitialized } = useFedimintWallet()
@@ -31,9 +32,14 @@ export default function PrivateChat() {
         if (isConnected && targetPersistentId) {
             const connected = isP2PConnected(targetPersistentId);
             setConnectionStatus(connected ? 'connected' : 'connecting');
-            
+
             if (connected && persistentUserId) {
                 sendPendingMessages();
+                // Request message sync when peer connects
+                if (!syncRequestedRef.current) {
+                    syncRequestedRef.current = true;
+                    setTimeout(() => requestMessageSync(), 1000);
+                }
             }
         } else {
             setConnectionStatus('disconnected');
@@ -51,38 +57,31 @@ export default function PrivateChat() {
                 const messagesWithNames = await Promise.all(
                     record.messages.map(async (msg: any) => {
                         let displayFrom = msg.from;
-                        
-                        // Check if msg.from is a UUID (contains hyphens and is long)
                         const isUUID = msg.from && msg.from.includes('-') && msg.from.length > 20;
-                        
+
                         if (isUUID) {
-                            // It's a persistent ID, resolve to display name
                             if (msg.from === persistentUserId) {
                                 displayFrom = await getDisplayName(persistentUserId);
                             } else {
                                 displayFrom = await getDisplayName(msg.from);
                             }
                         }
-                        // else: already a display name, keep it as is
-                        
-                        // Check if message is ecash payment
+
                         let messageType = msg.type || 'text';
                         let displayContent = msg.content;
                         let rawContent = msg.content;
-                        
+
                         try {
                             const parsed = JSON.parse(msg.content);
                             if (parsed.type === 'fedimint' || parsed.type === 'cashu') {
                                 messageType = 'ecash-payment';
                                 displayContent = `💰 ${parsed.type === 'fedimint' ? 'Fedimint' : 'Cashu'} Payment Token (Click to copy)`;
-                                rawContent = parsed.token;
+                                rawContent = parsed.notes; // ✅ FIXED
                             }
-                        } catch {
-                            // Not JSON, regular message
-                        }
+                        } catch {}
 
-                        return { 
-                            ...msg, 
+                        return {
+                            ...msg,
                             from: displayFrom,
                             type: messageType,
                             content: displayContent,
@@ -101,29 +100,39 @@ export default function PrivateChat() {
         const handleP2PMessage = async (event: any) => {
             const { from, content, timestamp } = event.detail;
             const currentChatId = window.location.pathname.split('/').pop();
-            
+
             if (from === targetPersistentId || from === currentChatId) {
-                // Check if it's an ecash payment
+                // Handle system messages (sync requests/responses)
+                try {
+                    const systemMsg = JSON.parse(content);
+                    
+                    if (systemMsg._system === 'sync-request') {
+                        await handleSyncRequest(from, systemMsg.lastMessageHash);
+                        return;
+                    }
+                    
+                    if (systemMsg._system === 'sync-response') {
+                        await handleSyncResponse(from, systemMsg.messages);
+                        return;
+                    }
+                } catch {}
+
+                // Regular message handling
                 let messageType = 'text';
                 let displayContent = content;
                 let rawContent = content;
-                
+
                 try {
                     const data = JSON.parse(content);
-                    
+
                     if (data.type === 'fedimint' || data.type === 'cashu') {
                         console.log('💰 Received ecash payment token');
                         messageType = 'ecash-payment';
                         displayContent = `💰 ${data.type === 'fedimint' ? 'Fedimint' : 'Cashu'} Payment Token (Click to copy)`;
-                        rawContent = data.token;
-                        
-                        // Main.tsx will handle auto-redeem if wallet is initialized
-                        // But we still show it in chat for manual copy if needed
+                        rawContent = data.notes; // ✅ FIXED
                     }
-                } catch {
-                    // Not JSON, regular message
-                }
-                
+                } catch {}
+
                 const senderName = await getDisplayName(from);
                 const newMessage = {
                     from: senderName,
@@ -134,19 +143,18 @@ export default function PrivateChat() {
                 };
 
                 setMessages((prev) => {
-                    const isDuplicate = prev.some(msg => 
-                        msg.timestamp === newMessage.timestamp && 
+                    const isDuplicate = prev.some(msg =>
+                        msg.timestamp === newMessage.timestamp &&
                         msg.rawContent === newMessage.rawContent &&
                         msg.from === newMessage.from
                     );
                     if (isDuplicate) return prev;
                     return [...prev, newMessage];
                 });
-                
-                // Store with original sender ID and original content
+
                 await storeMessage(persistentUserId, from, {
                     from: from,
-                    content: content, // Store original content (JSON for ecash)
+                    content: content,
                     timestamp: timestamp,
                     type: messageType
                 });
@@ -156,6 +164,122 @@ export default function PrivateChat() {
         window.addEventListener('p2p-message', handleP2PMessage);
         return () => window.removeEventListener('p2p-message', handleP2PMessage);
     }, [persistentUserId, targetPersistentId]);
+
+    // NEW: Request message sync from peer
+    const requestMessageSync = async () => {
+        if (!persistentUserId || !targetPersistentId) return;
+
+        try {
+            const db = await openDB('p2pchats', 2);
+            const record = await db.get('chat', [persistentUserId, targetPersistentId]);
+            
+            // Get hash of last message we have
+            const lastMessage = record?.messages?.[record.messages.length - 1];
+            const lastMessageHash = lastMessage 
+                ? `${lastMessage.timestamp}-${lastMessage.from}`
+                : null;
+
+            // Request sync
+            const syncRequest = JSON.stringify({
+                _system: 'sync-request',
+                lastMessageHash: lastMessageHash
+            });
+
+            await sendMessage(targetPersistentId, syncRequest);
+            console.log('📤 Requested message sync from peer');
+        } catch (error) {
+            console.error('Error requesting sync:', error);
+        }
+    };
+
+    // NEW: Handle sync request from peer
+    const handleSyncRequest = async (from: string, theirLastHash: string | null) => {
+        try {
+            const db = await openDB('p2pchats', 2);
+            const record = await db.get('chat', [persistentUserId, from]);
+
+            if (!record || !record.messages) {
+                // No messages to sync
+                return;
+            }
+
+            let messagesToSend = [];
+
+            if (!theirLastHash) {
+                // They have no messages, send all
+                messagesToSend = record.messages;
+            } else {
+                // Find messages after their last one
+                const lastIndex = record.messages.findIndex((msg: any) => 
+                    `${msg.timestamp}-${msg.from}` === theirLastHash
+                );
+
+                if (lastIndex !== -1 && lastIndex < record.messages.length - 1) {
+                    // Send messages after their last one
+                    messagesToSend = record.messages.slice(lastIndex + 1);
+                }
+            }
+
+            if (messagesToSend.length > 0) {
+                const syncResponse = JSON.stringify({
+                    _system: 'sync-response',
+                    messages: messagesToSend
+                });
+
+                await sendMessage(from, syncResponse);
+                console.log(`📤 Sent ${messagesToSend.length} missing messages to peer`);
+            }
+        } catch (error) {
+            console.error('Error handling sync request:', error);
+        }
+    };
+
+    // NEW: Handle sync response with missing messages
+    const handleSyncResponse = async (from: string, missedMessages: any[]) => {
+        if (!missedMessages || missedMessages.length === 0) return;
+
+        console.log(`📥 Received ${missedMessages.length} missing messages`);
+
+        for (const msg of missedMessages) {
+            // Store each missing message
+            await storeMessage(persistentUserId, from, msg);
+
+            // Add to UI
+            const senderName = await getDisplayName(msg.from);
+            let displayContent = msg.content;
+            let rawContent = msg.content;
+            let messageType = msg.type || 'text';
+
+            try {
+                const parsed = JSON.parse(msg.content);
+                if (parsed.type === 'fedimint' || parsed.type === 'cashu') {
+                    messageType = 'ecash-payment';
+                    displayContent = `💰 ${parsed.type === 'fedimint' ? 'Fedimint' : 'Cashu'} Payment Token (Click to copy)`;
+                    rawContent = parsed.notes;
+                }
+            } catch {}
+
+            const newMessage = {
+                from: senderName,
+                content: displayContent,
+                timestamp: msg.timestamp,
+                type: messageType,
+                rawContent: rawContent
+            };
+
+            setMessages((prev) => {
+                const isDuplicate = prev.some(m =>
+                    m.timestamp === newMessage.timestamp &&
+                    m.content === newMessage.content
+                );
+                if (isDuplicate) return prev;
+                
+                // Insert in correct chronological order
+                const updated = [...prev, newMessage];
+                return updated.sort((a, b) => a.timestamp - b.timestamp);
+            });
+        }
+    };
 
     const sendPendingMessages = async () => {
         if (!persistentUserId || !targetPersistentId) return;
@@ -183,20 +307,17 @@ export default function PrivateChat() {
 
     const getDisplayName = async (persistentId: string): Promise<string> => {
         const db = await openDB('p2pchats', 2);
-        
-        // Check userProfile first
+
         const userProfile = await db.get('userProfile', persistentId);
         if (userProfile && userProfile.displayName) {
             return userProfile.displayName;
         }
 
-        // Check p2pnaming (custom names)
         const customName = await db.get('p2pnaming', persistentId);
         if (customName?.name) {
             return customName.name;
         }
 
-        // Check knownPeers (from server registration)
         const knownPeer = await db.get('knownPeers', persistentId);
         if (knownPeer?.displayName) {
             return knownPeer.displayName;
@@ -215,11 +336,8 @@ export default function PrivateChat() {
         if (!name.trim()) return;
 
         const db = await openDB('p2pchats', 2);
-        
-        // Save to p2pnaming (custom names have priority)
         await db.put('p2pnaming', { peerid: persistentId, name: name.trim() });
-        
-        // Also update knownPeers if exists
+
         const knownPeer = await db.get('knownPeers', persistentId);
         if (knownPeer) {
             knownPeer.displayName = name.trim();
@@ -227,38 +345,33 @@ export default function PrivateChat() {
         }
 
         setDisplayName(name.trim());
-        
-        // Reload messages to update display names
+
         const record = await db.get('chat', [persistentUserId, targetPersistentId]);
         if (record && record.messages) {
             const messagesWithNames = await Promise.all(
                 record.messages.map(async (msg: any) => {
                     let displayFrom = msg.from;
                     const isUUID = msg.from && msg.from.includes('-') && msg.from.length > 20;
-                    
+
                     if (isUUID) {
-                        if (msg.from === persistentUserId) {
-                            displayFrom = await getDisplayName(persistentUserId);
-                        } else {
-                            displayFrom = await getDisplayName(msg.from);
-                        }
+                        displayFrom = await getDisplayName(msg.from === persistentUserId ? persistentUserId : msg.from);
                     }
-                    
+
                     let messageType = msg.type || 'text';
                     let displayContent = msg.content;
                     let rawContent = msg.content;
-                    
+
                     try {
                         const parsed = JSON.parse(msg.content);
                         if (parsed.type === 'fedimint' || parsed.type === 'cashu') {
                             messageType = 'ecash-payment';
                             displayContent = `💰 ${parsed.type === 'fedimint' ? 'Fedimint' : 'Cashu'} Payment Token (Click to copy)`;
-                            rawContent = parsed.token;
+                            rawContent = parsed.notes; // ✅ FIXED
                         }
                     } catch {}
 
-                    return { 
-                        ...msg, 
+                    return {
+                        ...msg,
                         from: displayFrom,
                         type: messageType,
                         content: displayContent,
@@ -286,18 +399,36 @@ export default function PrivateChat() {
             }
 
             const amount = Number(parts[1]);
-            
-            const { activeTab } = await import('../redux/store').then(m => {
-                const state = m.store.getState();
-                return { activeTab: state.ActiveWalletTab.activeTab };
-            });
+            let activeTab: boolean | undefined;
 
-            if (!activeTab && !isFedWalletInitialized) {
-                alert('Fedimint wallet not initialized');
-                return;
-            }
-            if (activeTab && !isCashuWalletInitialized) {
-                alert('Cashu wallet not initialized');
+            try {
+                const FedBalance = await Fedimintwallet?.balance.getBalance();
+                const fedSats = FedBalance ? FedBalance / 1000 : 0;
+
+                const cashuBalanceObj = await CocoManager?.wallet.getBalances();
+                const cashuSats = cashuBalanceObj 
+                    ? Object.values(cashuBalanceObj).reduce((sum, v) => sum + v, 0)
+                    : 0;
+
+                console.log(`💰 Balances - Fedimint: ${fedSats} sats, Cashu: ${cashuSats} sats`);
+                console.log(`💸 Trying to send: ${amount} sats`);
+
+                if (fedSats >= amount && cashuSats >= amount) {
+                    activeTab = false;
+                    console.log('✅ Using Fedimint (both wallets have enough)');
+                } else if (fedSats >= amount) {
+                    activeTab = false;
+                    console.log('✅ Using Fedimint');
+                } else if (cashuSats >= amount) {
+                    activeTab = true;
+                    console.log('✅ Using Cashu');
+                } else {
+                    alert(`❌ Insufficient balance!\nFedimint: ${fedSats} sats\nCashu: ${cashuSats} sats\nNeed: ${amount} sats`);
+                    return;
+                }
+            } catch (error) {
+                console.error('Error checking balances:', error);
+                alert('Failed to check wallet balances');
                 return;
             }
 
@@ -308,7 +439,7 @@ export default function PrivateChat() {
 
             try {
                 const { TransferFunds } = await import('../services/TransferFund');
-                const paymentData = await TransferFunds(
+                await TransferFunds(
                     activeTab,
                     Fedimintwallet,
                     CocoManager,
@@ -320,23 +451,22 @@ export default function PrivateChat() {
 
                 const paymentMessage = {
                     from: myName,
-                    content: `💸 Sent ${amount} sats`,
+                    content: `💸 Sent ${amount} sats via ${activeTab ? 'Cashu' : 'Fedimint'}`,
                     timestamp: Date.now(),
                     type: 'payment-sent'
                 };
 
                 setMessages((prev) => [...prev, paymentMessage]);
-                
-                // Store with persistent ID
+
                 await storeMessage(persistentUserId, targetPersistentId, {
                     from: persistentUserId,
                     content: paymentMessage.content,
                     timestamp: paymentMessage.timestamp,
                     type: paymentMessage.type
                 });
-                
+
                 setInputMessage('');
-                alert(`✅ Sent ${amount} sats!`);
+                alert(`✅ Sent ${amount} sats via ${activeTab ? 'Cashu' : 'Fedimint'}!`);
                 return;
             } catch (error) {
                 console.error('Payment error:', error);
@@ -366,22 +496,21 @@ export default function PrivateChat() {
         }
 
         setMessages((prev) => [...prev, newMessage]);
-        
-        // Store with persistent ID
+
         await storeMessage(persistentUserId, targetPersistentId, {
             from: persistentUserId,
             content: trimmedMessage,
             timestamp: newMessage.timestamp,
             type: 'text'
         });
-        
+
         setInputMessage('');
     };
 
     const storePendingMessage = async (content: string) => {
         const db = await openDB('p2pchats', 2);
         const key = [persistentUserId, targetPersistentId];
-        
+
         const existing = await db.get('pendingMessages', key);
         const pendingMsg = {
             content: content,
@@ -421,8 +550,15 @@ export default function PrivateChat() {
         };
 
         if (existing) {
-            existing.messages.push(newMessage);
-            await db.put('chat', existing);
+            const isDuplicate = existing.messages.some((msg: any) =>
+                msg.timestamp === newMessage.timestamp &&
+                msg.content === newMessage.content
+            );
+            
+            if (!isDuplicate) {
+                existing.messages.push(newMessage);
+                await db.put('chat', existing);
+            }
         } else {
             await db.put('chat', {
                 userID: fromUserId,
@@ -476,10 +612,10 @@ export default function PrivateChat() {
                 <div className="community-info">
                     <h2 className="community-name">Chat with {displayName}</h2>
                     <span className="community-id">
-                        ID: {targetPersistentId.slice(0, 12)}... 
-                        <i 
-                            onClick={() => navigator.clipboard.writeText(targetPersistentId)} 
-                            style={{cursor:'pointer'}} 
+                        ID: {targetPersistentId.slice(0, 12)}...
+                        <i
+                            onClick={() => navigator.clipboard.writeText(targetPersistentId)}
+                            style={{ cursor: 'pointer' }}
                             className="fa-regular fa-copy"
                         />
                     </span>
@@ -510,8 +646,8 @@ export default function PrivateChat() {
                             <div className="empty-icon">💬</div>
                             <p className="empty-text">No messages yet</p>
                             <p className="empty-subtext">
-                                {connectionStatus === 'connected' 
-                                    ? 'Start a conversation!' 
+                                {connectionStatus === 'connected'
+                                    ? 'Start a conversation!'
                                     : 'Waiting for peer to connect...'}
                             </p>
                         </div>
@@ -525,7 +661,7 @@ export default function PrivateChat() {
                                             {new Date(message.timestamp).toLocaleTimeString()}
                                         </span>
                                     </div>
-                                    <div 
+                                    <div
                                         className="message-content"
                                         onClick={() => {
                                             if (message.type === 'ecash-payment' && message.rawContent) {
@@ -534,8 +670,8 @@ export default function PrivateChat() {
                                         }}
                                         style={{
                                             cursor: message.type === 'ecash-payment' ? 'pointer' : 'default',
-                                            backgroundColor: message.type === 'ecash-payment' ? '#2a5934' : 
-                                                           message.type === 'payment-sent' ? '#3d5a47' : 'transparent',
+                                            backgroundColor: message.type === 'ecash-payment' ? '#50da6eff' :
+                                                message.type === 'payment-sent' ? '#50da6eff' : 'transparent',
                                             padding: message.type === 'ecash-payment' || message.type === 'payment-sent' ? '12px' : undefined,
                                             borderRadius: message.type === 'ecash-payment' || message.type === 'payment-sent' ? '8px' : undefined,
                                             border: message.type === 'ecash-payment' ? '2px solid #4ade80' : undefined
@@ -543,7 +679,10 @@ export default function PrivateChat() {
                                     >
                                         {message.content}
                                         {message.type === 'ecash-payment' && (
-                                            <div style={{fontSize: '11px', marginTop: '8px', opacity: 0.8}}>
+                                            <div 
+                                                style={{ fontSize: '11px', marginTop: '8px', opacity: 0.8 }}
+                                                onClick={() => navigator.clipboard.writeText(message.rawContent ?? '')}
+                                            >
                                                 💡 Click to copy token or wait for auto-redeem
                                             </div>
                                         )}
@@ -560,8 +699,8 @@ export default function PrivateChat() {
                     <div className="input-wrapper">
                         <input
                             type="text"
-                            placeholder={connectionStatus === 'connected' 
-                                ? "Type /pay <amount> to send sats 🔐" 
+                            placeholder={connectionStatus === 'connected'
+                                ? "Type /pay <amount> to send sats 🔐"
                                 : "Enter Message (will send when connected)"}
                             value={inputMessage}
                             onChange={(e) => setInputMessage(e.target.value)}
@@ -575,11 +714,11 @@ export default function PrivateChat() {
                         >
                             <span className="send-icon">→</span>
                             {connectionStatus !== 'connected' && (
-                                <span style={{fontSize: '10px', marginLeft: '4px'}}>📝</span>
+                                <span style={{ fontSize: '10px', marginLeft: '4px' }}>📝</span>
                             )}
                         </button>
                     </div>
-                    <div style={{fontSize: '11px', color: '#888', marginTop: '4px', padding: '0 12px'}}>
+                    <div style={{ fontSize: '11px', color: '#888', marginTop: '4px', padding: '0 12px' }}>
                         💡 Tip: Type <code>/pay 100</code> to send 100 sats
                     </div>
                 </form>

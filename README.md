@@ -1,33 +1,26 @@
 # EchoCash
 
-EchoCash is a decentralized, peer-to-peer communication platform built using Libp2p. It enables people to connect, communicate, and form local communities without the need for internet access. Whether you're in a disaster zone, a rural village, a school campus, or just looking to meet nearby people, EchoCash makes spontaneous, offline networking possible.
+EchoCash is a decentralized, peer-to-peer communication and payment platform built using WebRTC and WebSockets. It enables people to connect, communicate, and transfer value (sats via Fedimint/Cashu) without relying on centralized servers. Whether you're in a disaster zone, a rural village, a school campus, or just looking to meet nearby people, EchoCash makes spontaneous, offline networking and payments possible.
 
-## 🚀 Key Features:
+🚀 Key Features:
 
-- 📶 Internet-Free Communication – Works entirely over local mesh networks (Wi-Fi).
+- 📶 Decentralized Communication – Direct peer-to-peer messaging over WebRTC with end-to-end encryption
+- 💰 Ecash Payments – Send and receive Bitcoin (sats) via Fedimint and Cashu protocols
+- 🔐 Private & Secure – AES-GCM encryption for all messages with no central server storing data
+- 🆔 Persistent Identity – Strong persistent user IDs that remain consistent across sessions
+- 💬 Message History – All chats stored locally in IndexedDB for privacy
+- 📝 Offline Messaging – Send messages that auto-deliver when peers reconnect
+- 🎨 Custom Names – Assign memorable nicknames to peers instead of UUIDs
+- 🔄 Auto-Reconnect – Automatic peer reconnection when connections drop
+- 🌐 Local Network Discovery – Find and connect to peers on the same signaling server
 
-- 🧑‍🤝‍🧑 Local Communities – Create or join local chat groups.
+🚀 Future Deliverables:
 
-- 🆘 Disaster-Ready – Stay connected even during emergencies when internet is down.
-
-- 🗣️ Private & Anonymous – Communicate securely without needing a central server or login.
-
-- 🧭 Discovery Protocols – Automatically find peers around you using local network discovery.
-
-- 🎉 Fun & Social – Break the ice and meet strangers in hotels, campuses, hostels, or anywhere offline.
-
-- Ⓜ️ Can see the previous chated peers and their messages and all are stored locally not an external server and have strong persistant userid so that peer can remember other users.
-
-- 📢 Unpublished messages can be sended once the peer is connected.
-
-## 🚀 Future Deliverables:
-
-- Enable communication made easy in communities
-- A dashboard to show the connection status, internet usage if they enabled!
-- Integerating Bluetooth mesh topology
-- Enabling file and document transfer
-- Enabling PWA
-- ...and alot more features
+- Community chat rooms with multiple participants
+- Connection status dashboard with metrics
+- Bluetooth mesh topology for true offline communication
+- File and document transfer capabilities
+- Progressive Web App (PWA) support
 
 ## 🏃‍♀️‍➡️ Running the Application:
 
